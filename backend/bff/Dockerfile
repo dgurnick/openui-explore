@@ -1,15 +1,10 @@
-# Stage 1: build the fat JAR from source
-FROM gradle:8.14-jdk21-alpine AS builder
-WORKDIR /build
-COPY . .
-RUN gradle buildFatJar --no-daemon
-
-# Stage 2: minimal JRE runtime image
+# Use the pre-built fat JAR produced by: ./gradlew shadowJar
+# This avoids re-downloading all Gradle dependencies on every docker build.
 FROM eclipse-temurin:21-jre-alpine
 RUN apk add --no-cache curl
 
 WORKDIR /app
-COPY --from=builder /build/build/libs/openui-bff-all.jar app.jar
+COPY build/libs/openui-bff-all.jar app.jar
 
 # Persistent volume for the SQLite database file
 RUN mkdir -p /data

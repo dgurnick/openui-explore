@@ -8,15 +8,22 @@ import kotlinx.coroutines.flow.Flow
 
 class ChatRepository(private val apiService: OpenUIApiService) {
     fun streamResponse(history: List<ChatMessage>, model: String): Flow<String> {
-        val apiMessages = history.map { msg ->
-            ApiChatMessage(
-                role = when (msg.role) {
-                    Role.USER -> "user"
-                    Role.ASSISTANT -> "assistant"
-                },
-                content = msg.content
-            )
-        }
+        // Drop any leading assistant messages (e.g. the welcome/status message) before
+        // the first user message — they confuse the LLM and override the system prompt persona.
+        val firstUserIdx = history.indexOfFirst { it.role == Role.USER }
+        val conversationHistory = if (firstUserIdx > 0) history.drop(firstUserIdx) else history
+
+        val apiMessages =
+                conversationHistory.map { msg ->
+                    ApiChatMessage(
+                            role =
+                                    when (msg.role) {
+                                        Role.USER -> "user"
+                                        Role.ASSISTANT -> "assistant"
+                                    },
+                            content = msg.content
+                    )
+                }
         return apiService.streamChat(apiMessages, model)
     }
 }

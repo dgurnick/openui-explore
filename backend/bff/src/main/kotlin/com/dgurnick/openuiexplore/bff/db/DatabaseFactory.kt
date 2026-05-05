@@ -16,10 +16,10 @@ object DatabaseFactory {
 
         // Flyway runs SQL migrations from resources/db/migration/
         Flyway.configure()
-            .dataSource(jdbcUrl, null, null)
-            .locations("classpath:db/migration")
-            .load()
-            .migrate()
+                .dataSource(jdbcUrl, null, null)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate()
 
         // Connect Exposed after migrations are applied
         Database.connect(jdbcUrl, driver = "org.sqlite.JDBC")
@@ -34,10 +34,15 @@ object DatabaseFactory {
         newSuspendedTransaction {
             val count = Users.selectAll().count()
             if (count == 0L) {
-                val hash = BCrypt.withDefaults().hashToString(12, adminPassword.toCharArray())
+                val adminHash = BCrypt.withDefaults().hashToString(12, adminPassword.toCharArray())
                 Users.insert {
                     it[username] = adminUsername
-                    it[passwordHash] = hash
+                    it[passwordHash] = adminHash
+                }
+                val guestHash = BCrypt.withDefaults().hashToString(12, "guest".toCharArray())
+                Users.insert {
+                    it[username] = "john.doe"
+                    it[passwordHash] = guestHash
                 }
             }
         }
@@ -45,6 +50,5 @@ object DatabaseFactory {
 
     // Unused by Exposed directly - Flyway owns schema creation.
     // Listed here as documentation of the managed tables.
-    @Suppress("unused")
-    val managedTables = arrayOf(Users, RequestLogs)
+    @Suppress("unused") val managedTables = arrayOf(Users, RequestLogs)
 }

@@ -20,14 +20,15 @@ services:
       - .env
     environment:
       - OPENUI_DEV_MODE=${OPENUI_DEV_MODE:-true}
+      - OPENUI_ENVIRONMENT=local
     volumes:
       # Live-mount only the Python source so edits are picked up by hot-reload.
       # The .venv installed at /app/.venv during the Docker build is preserved.
       - ./backend/openui/backend/openui:/app/openui
-    command: ["python", "-m", "openui", "--dev"]
+    command: [ "python", "-m", "openui" ]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7878/v1/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7878/v1/health')" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,12 +63,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/health"]
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/v1/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-
   # ---- Optional Ollama sidecar ----
   # Uncomment to run a local model without installing Ollama on the host.
   # ollama:
@@ -79,5 +79,6 @@ services:
   #     - ollama_data:/root/.ollama
 
 volumes:
-  bff_data:  # Persists the SQLite database across container restarts
-  # ollama_data:
+  bff_data:
+    # Persists the SQLite database across container restarts
+    # ollama_data:

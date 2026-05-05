@@ -24,15 +24,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            MaterialTheme {
-                AppNavigation()
-            }
-        }
+        setContent { MaterialTheme { AppNavigation() } }
     }
 }
 
-private enum class Screen { SPLASH, LOGIN, CHAT }
+private enum class Screen {
+    SPLASH,
+    LOGIN,
+    CHAT
+}
 
 @Composable
 private fun AppNavigation() {
@@ -43,28 +43,30 @@ private fun AppNavigation() {
             val vm: SplashViewModel = koinViewModel()
             val state by vm.state.collectAsState()
             SplashScreen(
-                state = state,
-                onRetry = vm::connect,
-                onConnected = { screen = Screen.LOGIN }
+                    state = state,
+                    onRetry = vm::connect,
+                    onConnected = { screen = Screen.LOGIN }
             )
         }
         Screen.LOGIN -> {
             val vm: LoginViewModel = koinViewModel()
             val state by vm.state.collectAsState()
             LoginScreen(
-                state = state,
-                onLogin = vm::login,
-                onDismissError = vm::dismissError,
-                onSuccess = { screen = Screen.CHAT }
+                    state = state,
+                    onLogin = vm::login,
+                    onDismissError = vm::dismissError,
+                    onSuccess = { screen = Screen.CHAT }
             )
         }
         Screen.CHAT -> {
             val vm: ChatViewModel = koinViewModel()
             val state by vm.state.collectAsState()
             ChatScreen(
-                state = state,
-                onSend = vm::sendMessage,
-                onDismissError = vm::dismissError
+                    state = state,
+                    onSend = vm::sendMessage,
+                    onDismissError = vm::dismissError,
+                    onReset = vm::resetChat,
+                    onQuickAction = vm::sendMessage
             )
         }
     }
