@@ -6,9 +6,13 @@ A **Kotlin Multiplatform (KMP)** mobile application for Android and iOS that con
 
 ## Screenshots
 
-| Welcome screen | Generated widget |
+| Welcome screen | Check balance |
 |---|---|
-| ![Welcome screen with quick-action chips](docs/screenshots/welcome.png) | ![AI-generated transactions list](docs/screenshots/widget.png) |
+| ![Welcome screen with quick-action chips](docs/screenshots/welcome.png) | ![AI-generated account balance overview](docs/screenshots/check_balance.png) |
+
+| Transactions | Pay a bill |
+|---|---|
+| ![AI-generated recent transactions list](docs/screenshots/transactions.png) | ![AI-generated utility bill payment form](docs/screenshots/pay_a_bill.png) |
 
 ---
 
