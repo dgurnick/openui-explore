@@ -1,0 +1,15 @@
+{
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/.gradle/**": true,
+    "**/build/intermediates/**": true
+  },
+  "search.exclude": {
+    "**/build/**": true,
+    "**/.gradle/**": true
+  },
+  "kotlin.indexing.exclude": [
+    "**/build/**",
+    "**/.gradle/**"
+  ]
+}
