@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "openui-explore"
 include(":shared", ":androidApp")
+project(":shared").projectDir = file("app/shared")
+project(":androidApp").projectDir = file("app/androidApp")

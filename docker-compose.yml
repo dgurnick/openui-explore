@@ -8,7 +8,7 @@ services:
   # over /app/openui so the .venv at /app/.venv remains intact.
   backend:
     build:
-      context: ./backend/backend
+      context: ./backend/openui/backend
       dockerfile: Dockerfile
     image: openui-explore-backend:dev
     container_name: openui-backend
@@ -23,7 +23,7 @@ services:
     volumes:
       # Live-mount only the Python source so edits are picked up by hot-reload.
       # The .venv installed at /app/.venv during the Docker build is preserved.
-      - ./backend/backend/openui:/app/openui
+      - ./backend/openui/backend/openui:/app/openui
     command: ["python", "-m", "openui", "--dev"]
     restart: unless-stopped
     healthcheck:
@@ -40,7 +40,7 @@ services:
   # All mobile API traffic flows through this service.
   bff:
     build:
-      context: ./bff
+      context: ./backend/bff
       dockerfile: Dockerfile
     image: openui-explore-bff:dev
     container_name: openui-bff

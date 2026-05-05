@@ -39,52 +39,54 @@ OpenUI runs as a local Python server (port `7878`) backed by any LLM (OpenAI, An
 
 ```
 openui-explore/
-├── backend/                       # Git submodule: wandb/openui (Python backend)
-│   └── backend/                   # Python package root
-│       ├── Dockerfile             # Multi-stage uv build
-│       ├── pyproject.toml
-│       └── openui/                # Python source - edit here for new features
-├── bff/                           # Ktor BFF - standalone Gradle project
-│   ├── settings.gradle.kts        # Standalone (not part of the root project)
-│   ├── build.gradle.kts
-│   ├── Dockerfile
-│   └── src/main/
-│       ├── kotlin/
-│       │   └── .../bff/
-│       │       ├── Application.kt
-│       │       ├── plugins/       # Auth, DB, Logging, Routing, Serialization
-│       │       ├── routes/        # AuthRoutes, ProxyRoutes
-│       │       ├── db/
-│       │       │   ├── DatabaseFactory.kt  # Flyway init + Exposed connect + seed
-│       │       │   └── tables/    # Users, RequestLogs (Exposed table objects)
-│       │       └── model/         # AuthRequest, TokenResponse, ErrorResponse
-│       └── resources/
-│           ├── application.conf   # HOCON config with env var overrides
-│           ├── logback.xml
-│           └── db/migration/
-│               ├── V1__create_users.sql
-│               └── V2__create_request_logs.sql
-├── shared/                        # KMP shared module (logic + UI)
-│   ├── commonMain/
-│   │   ├── data/
-│   │   │   ├── model/             # ChatMessage, ApiModels, AuthModels
-│   │   │   ├── network/           # Ktor client, OpenUIApiService
-│   │   │   └── repository/        # ConnectionRepository, AuthRepository, ChatRepository
-│   │   ├── presentation/
-│   │   │   ├── splash/            # SplashViewModel, SplashState
-│   │   │   ├── login/             # LoginViewModel, LoginState
-│   │   │   └── chat/              # ChatViewModel, ChatState
-│   │   └── ui/
-│   │       ├── splash/            # SplashScreen composable
-│   │       ├── login/             # LoginScreen composable
-│   │       └── chat/              # ChatScreen, MessageBubble composables
-│   ├── androidMain/               # Android actuals (OkHttp engine)
-│   └── iosMain/                   # iOS actuals (Darwin engine, future)
-├── androidApp/                    # Android application module
-│   └── src/main/kotlin/
-│       ├── MainActivity.kt        # Splash / Login / Chat navigation
-│       ├── OpenUIApp.kt           # Koin init, BFF URL config
-│       └── di/ViewModelModule.kt  # ViewModel bindings
+├── app/                           # Mobile application code (KMP)
+│   ├── shared/                    # KMP shared module (logic + UI)
+│   │   ├── commonMain/
+│   │   │   ├── data/
+│   │   │   │   ├── model/         # ChatMessage, ApiModels, AuthModels
+│   │   │   │   ├── network/       # Ktor client, OpenUIApiService
+│   │   │   │   └── repository/    # ConnectionRepository, AuthRepository, ChatRepository
+│   │   │   ├── presentation/
+│   │   │   │   ├── splash/        # SplashViewModel, SplashState
+│   │   │   │   ├── login/         # LoginViewModel, LoginState
+│   │   │   │   └── chat/          # ChatViewModel, ChatState
+│   │   │   └── ui/
+│   │   │       ├── splash/        # SplashScreen composable
+│   │   │       ├── login/         # LoginScreen composable
+│   │   │       └── chat/          # ChatScreen, MessageBubble composables
+│   │   ├── androidMain/           # Android actuals (OkHttp engine)
+│   │   └── iosMain/               # iOS actuals (Darwin engine, future)
+│   └── androidApp/                # Android application module
+│       └── src/main/kotlin/
+│           ├── MainActivity.kt    # Splash / Login / Chat navigation
+│           ├── OpenUIApp.kt       # Koin init, BFF URL config
+│           └── di/ViewModelModule.kt
+├── backend/                       # All server-side code
+│   ├── openui/                    # Git submodule: wandb/openui (Python backend)
+│   │   └── backend/               # Python package root
+│   │       ├── Dockerfile         # Multi-stage uv build
+│   │       ├── pyproject.toml
+│   │       └── openui/            # Python source - edit here for new features
+│   └── bff/                       # Ktor BFF - standalone Gradle project
+│       ├── settings.gradle.kts    # Standalone (not part of the root project)
+│       ├── build.gradle.kts
+│       ├── Dockerfile
+│       └── src/main/
+│           ├── kotlin/
+│           │   └── .../bff/
+│           │       ├── Application.kt
+│           │       ├── plugins/   # Auth, DB, Logging, Routing, Serialization
+│           │       ├── routes/    # AuthRoutes, ProxyRoutes
+│           │       ├── db/
+│           │       │   ├── DatabaseFactory.kt
+│           │       │   └── tables/
+│           │       └── model/
+│           └── resources/
+│               ├── application.conf
+│               ├── logback.xml
+│               └── db/migration/
+│                   ├── V1__create_users.sql
+│                   └── V2__create_request_logs.sql
 ├── docker-compose.yml             # Dev environment (backend + BFF)
 └── .env.example                   # API key + JWT secret template
 ```
@@ -296,7 +298,7 @@ The Ktor BFF sits between the mobile app and OpenUI. It has two responsibilities
 The BFF issues HMAC-256 signed JWTs with a configurable expiry (default 24 hours). The mobile app includes the token in `Authorization: Bearer <token>` on every proxied request. The BFF validates the signature and expiry before forwarding.
 
 ### 4. SQLite + Flyway Migrations
-The BFF uses SQLite via the Exposed ORM for persistence. Schema changes are managed exclusively through Flyway SQL migration files in `bff/src/main/resources/db/migration/`. Flyway runs on every startup and is idempotent. Exposed does not manage the schema.
+The BFF uses SQLite via the Exposed ORM for persistence. Schema changes are managed exclusively through Flyway SQL migration files in `backend/bff/src/main/resources/db/migration/`. Flyway runs on every startup and is idempotent. Exposed does not manage the schema.
 
 Current tables:
 - `users` - username + BCrypt-hashed password
@@ -383,31 +385,31 @@ docker compose up
 
 The Android emulator reaches the BFF at `http://10.0.2.2:8080` (already the default in `OpenUIApp.kt`).
 
-**How hot-reload works for the backend:** `docker-compose.yml` bind-mounts `backend/backend/openui/` over `/app/openui`. Edits to Python source are picked up immediately by uvicorn. A rebuild is only needed when `pyproject.toml` or `uv.lock` changes.
+**How hot-reload works for the backend:** `docker-compose.yml` bind-mounts `backend/openui/backend/openui/` over `/app/openui`. Edits to Python source are picked up immediately by uvicorn. A rebuild is only needed when `pyproject.toml` or `uv.lock` changes.
 
 ### Adding or modifying backend features
 
-Edit files under `backend/backend/openui/`, save, and the running container reloads automatically.
+Edit files under `backend/openui/backend/openui/`, save, and the running container reloads automatically.
 
 When you want to add a Python dependency:
 
 ```bash
-cd backend/backend
+cd backend/openui/backend
 uv add <package>              # updates pyproject.toml + uv.lock
-cd ../..
+cd ../../..
 docker compose build backend  # rebuild to install the new dep
 ```
 
 ### Pointing the submodule at your own fork
 
 ```bash
-cd backend
+cd backend/openui
 git remote add fork https://github.com/<you>/openui.git
 git checkout -b my-feature
 # ... make changes ...
 git push fork my-feature
-cd ..
-git add backend
+cd ../..
+git add backend/openui
 git commit -m "backend: advance submodule to my-feature"
 ```
 
@@ -415,12 +417,12 @@ git commit -m "backend: advance submodule to my-feature"
 
 ## BFF Development
 
-The BFF is a standalone Ktor application in `bff/`. It has its own `settings.gradle.kts` so it can be built and dockerized independently of the KMP mobile project (no Android SDK required).
+The BFF is a standalone Ktor application in `backend/bff/`. It has its own `settings.gradle.kts` so it can be built and dockerized independently of the KMP mobile project (no Android SDK required).
 
 ### Running the BFF locally (without Docker)
 
 ```bash
-cd bff
+cd backend/bff
 
 # Run with Gradle
 ./gradlew run
@@ -440,7 +442,7 @@ BFF_ADMIN_PASSWORD=mypassword \
 Flyway runs automatically on startup. Migration files live at:
 
 ```
-bff/src/main/resources/db/migration/
+backend/bff/src/main/resources/db/migration/
     V1__create_users.sql
     V2__create_request_logs.sql
     V3__your_next_change.sql   <-- add new migrations here
@@ -450,13 +452,13 @@ Naming convention: `V{version}__{description}.sql`. Flyway tracks applied versio
 
 ### Adding a new BFF route
 
-1. Add the route function in `bff/src/main/kotlin/.../routes/`
+1. Add the route function in `backend/bff/src/main/kotlin/.../routes/`
 2. Register it in `Routing.kt`
 3. Wrap with `authenticate("jwt-auth") { ... }` if it requires a valid JWT
 
 ### App backend URL
 
-The URL the Android app connects to is set in `androidApp/src/main/kotlin/com/dgurnick/openuiexplore/OpenUIApp.kt`:
+The URL the Android app connects to is set in `app/androidApp/src/main/kotlin/com/dgurnick/openuiexplore/OpenUIApp.kt`:
 
 | Context | URL |
 |---|---|
