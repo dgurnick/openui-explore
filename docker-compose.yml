@@ -12,8 +12,10 @@ services:
       dockerfile: Dockerfile
     image: openui-explore-backend:dev
     container_name: openui-backend
+    # Port 7878 exposed for direct local dev access.
+    # In production, remove this - only the BFF should be reachable externally.
     ports:
-      - "${OPENUI_PORT:-7878}:7878"
+      - "7878:7878"
     env_file:
       - .env
     environment:
@@ -22,7 +24,6 @@ services:
       # Live-mount only the Python source so edits are picked up by hot-reload.
       # The .venv installed at /app/.venv during the Docker build is preserved.
       - ./backend/backend/openui:/app/openui
-    # --dev enables uvicorn --reload so source changes restart the server.
     command: ["python", "-m", "openui", "--dev"]
     restart: unless-stopped
     healthcheck:
@@ -31,6 +32,41 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # ---- Ktor BFF (Backend for Frontend) ----
+  #
+  # Sits between the mobile app and the OpenUI backend.
+  # Handles JWT authentication and request/response logging.
+  # All mobile API traffic flows through this service.
+  bff:
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    image: openui-explore-bff:dev
+    container_name: openui-bff
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      # Internal Docker network URL - backend not exposed externally when BFF is used
+      - OPENUI_BACKEND_URL=http://openui-backend:7878
+      - DATABASE_PATH=/data/openui-bff.db
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - BFF_ADMIN_USERNAME=${BFF_ADMIN_USERNAME:-admin}
+      - BFF_ADMIN_PASSWORD=${BFF_ADMIN_PASSWORD:-changeme}
+    volumes:
+      - bff_data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # ---- Optional Ollama sidecar ----
   # Uncomment to run a local model without installing Ollama on the host.
@@ -42,5 +78,6 @@ services:
   #   volumes:
   #     - ollama_data:/root/.ollama
 
-# volumes:
-#   ollama_data:
+volumes:
+  bff_data:  # Persists the SQLite database across container restarts
+  # ollama_data:

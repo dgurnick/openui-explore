@@ -12,8 +12,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.dgurnick.openuiexplore.presentation.chat.ChatViewModel
+import com.dgurnick.openuiexplore.presentation.login.LoginViewModel
 import com.dgurnick.openuiexplore.presentation.splash.SplashViewModel
 import com.dgurnick.openuiexplore.ui.chat.ChatScreen
+import com.dgurnick.openuiexplore.ui.login.LoginScreen
 import com.dgurnick.openuiexplore.ui.splash.SplashScreen
 import org.koin.compose.viewmodel.koinViewModel
 
@@ -30,25 +32,40 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class Screen { SPLASH, LOGIN, CHAT }
+
 @Composable
 private fun AppNavigation() {
-    var showChat by rememberSaveable { mutableStateOf(false) }
+    var screen by rememberSaveable { mutableStateOf(Screen.SPLASH) }
 
-    if (showChat) {
-        val chatViewModel: ChatViewModel = koinViewModel()
-        val chatState by chatViewModel.state.collectAsState()
-        ChatScreen(
-            state = chatState,
-            onSend = chatViewModel::sendMessage,
-            onDismissError = chatViewModel::dismissError
-        )
-    } else {
-        val splashViewModel: SplashViewModel = koinViewModel()
-        val splashState by splashViewModel.state.collectAsState()
-        SplashScreen(
-            state = splashState,
-            onRetry = splashViewModel::connect,
-            onConnected = { showChat = true }
-        )
+    when (screen) {
+        Screen.SPLASH -> {
+            val vm: SplashViewModel = koinViewModel()
+            val state by vm.state.collectAsState()
+            SplashScreen(
+                state = state,
+                onRetry = vm::connect,
+                onConnected = { screen = Screen.LOGIN }
+            )
+        }
+        Screen.LOGIN -> {
+            val vm: LoginViewModel = koinViewModel()
+            val state by vm.state.collectAsState()
+            LoginScreen(
+                state = state,
+                onLogin = vm::login,
+                onDismissError = vm::dismissError,
+                onSuccess = { screen = Screen.CHAT }
+            )
+        }
+        Screen.CHAT -> {
+            val vm: ChatViewModel = koinViewModel()
+            val state by vm.state.collectAsState()
+            ChatScreen(
+                state = state,
+                onSend = vm::sendMessage,
+                onDismissError = vm::dismissError
+            )
+        }
     }
 }

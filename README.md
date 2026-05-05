@@ -19,7 +19,11 @@ OpenUI runs as a local Python server (port `7878`) backed by any LLM (OpenAI, An
 |---|---|
 | Shared code (logic + UI) | Kotlin Multiplatform + Compose Multiplatform |
 | Android host app | Jetpack Compose (Material 3) |
-| iOS host app | SwiftUI shell + Compose Multiplatform views |
+| iOS host app | SwiftUI shell + Compose Multiplatform views (future) |
+| BFF (Backend for Frontend) | Ktor 3 (JVM, standalone Gradle project) |
+| BFF auth | JWT (HMAC-256) via `ktor-server-auth-jwt` |
+| BFF database | SQLite via Exposed ORM |
+| BFF migrations | Flyway (SQL files, classpath-based) |
 | HTTP client | Ktor (multiplatform) |
 | Streaming | Server-Sent Events (SSE) via Ktor |
 | Async / state | Kotlin Coroutines + `StateFlow` |
@@ -40,27 +44,49 @@ openui-explore/
 │       ├── Dockerfile             # Multi-stage uv build
 │       ├── pyproject.toml
 │       └── openui/                # Python source - edit here for new features
+├── bff/                           # Ktor BFF - standalone Gradle project
+│   ├── settings.gradle.kts        # Standalone (not part of the root project)
+│   ├── build.gradle.kts
+│   ├── Dockerfile
+│   └── src/main/
+│       ├── kotlin/
+│       │   └── .../bff/
+│       │       ├── Application.kt
+│       │       ├── plugins/       # Auth, DB, Logging, Routing, Serialization
+│       │       ├── routes/        # AuthRoutes, ProxyRoutes
+│       │       ├── db/
+│       │       │   ├── DatabaseFactory.kt  # Flyway init + Exposed connect + seed
+│       │       │   └── tables/    # Users, RequestLogs (Exposed table objects)
+│       │       └── model/         # AuthRequest, TokenResponse, ErrorResponse
+│       └── resources/
+│           ├── application.conf   # HOCON config with env var overrides
+│           ├── logback.xml
+│           └── db/migration/
+│               ├── V1__create_users.sql
+│               └── V2__create_request_logs.sql
 ├── shared/                        # KMP shared module (logic + UI)
 │   ├── commonMain/
 │   │   ├── data/
-│   │   │   ├── model/             # ChatMessage, ApiModels
+│   │   │   ├── model/             # ChatMessage, ApiModels, AuthModels
 │   │   │   ├── network/           # Ktor client, OpenUIApiService
-│   │   │   └── repository/        # ConnectionRepository, ChatRepository
+│   │   │   └── repository/        # ConnectionRepository, AuthRepository, ChatRepository
 │   │   ├── presentation/
 │   │   │   ├── splash/            # SplashViewModel, SplashState
+│   │   │   ├── login/             # LoginViewModel, LoginState
 │   │   │   └── chat/              # ChatViewModel, ChatState
 │   │   └── ui/
 │   │       ├── splash/            # SplashScreen composable
+│   │       ├── login/             # LoginScreen composable
 │   │       └── chat/              # ChatScreen, MessageBubble composables
 │   ├── androidMain/               # Android actuals (OkHttp engine)
 │   └── iosMain/                   # iOS actuals (Darwin engine, future)
 ├── androidApp/                    # Android application module
 │   └── src/main/kotlin/
-│       ├── MainActivity.kt        # Edge-to-edge host, Splash/Chat nav
-│       ├── OpenUIApp.kt           # Koin init, backend URL config
+│       ├── MainActivity.kt        # Splash / Login / Chat navigation
+│       ├── OpenUIApp.kt           # Koin init, BFF URL config
 │       └── di/ViewModelModule.kt  # ViewModel bindings
-├── docker-compose.yml             # Dev environment (builds from submodule)
-└── .env.example                   # API key template (copy to .env)
+├── docker-compose.yml             # Dev environment (backend + BFF)
+└── .env.example                   # API key + JWT secret template
 ```
 
 ---
@@ -86,24 +112,34 @@ graph TD
         AM[MainActivity]
     end
 
-    subgraph iOS["iOS Host"]
+    subgraph iOS["iOS Host (future)"]
         IM[ContentView.swift]
     end
 
     subgraph KMP_UI["Shared UI — Compose Multiplatform"]
         SP[SplashScreen]
+        LG[LoginScreen]
         CH[ChatScreen]
     end
 
     subgraph KMP_VM["Shared Presentation"]
         SVM[SplashViewModel]
+        LVM[LoginViewModel]
         CVM[ChatViewModel]
     end
 
     subgraph KMP_Data["Shared Data"]
         CR[ConnectionRepository]
+        AR[AuthRepository]
         CHR[ChatRepository]
         API[OpenUIApiService — Ktor]
+    end
+
+    subgraph BFF["Ktor BFF :8080"]
+        JWTM[JWT Middleware]
+        PROXY[OpenUI Proxy]
+        DB[(SQLite)]
+        REQLOG[Request Logger]
     end
 
     subgraph Backend["OpenUI Backend :7878"]
@@ -114,44 +150,61 @@ graph TD
     AM -->|setContent| SP
     IM -->|ComposeUIViewController| SP
     SP --> SVM
-    SP -- "on connected" --> CH
+    SP -- "on connected" --> LG
+    LG --> LVM
+    LG -- "on success" --> CH
     CH --> CVM
     SVM --> CR
+    LVM --> AR
     CVM --> CHR
     CR --> API
+    AR --> API
     CHR --> API
-    API -->|HTTP + SSE| PY
+    API -->|GET health / POST auth/token| BFF
+    API -->|POST chat Bearer JWT| JWTM
+    JWTM --> PROXY
+    JWTM --> REQLOG
+    REQLOG --> DB
+    PROXY -->|HTTP + SSE| PY
     PY --> LLM
 ```
 
 ---
 
-### App Launch & Connection Flow
+### App Launch, Auth, and Chat Flow
 
 ```mermaid
 %%{init: {'theme': 'dark'}}%%
 sequenceDiagram
     participant App as App (Android / iOS)
     participant Splash as SplashScreen
-    participant SVM as SplashViewModel
-    participant Repo as ConnectionRepository
-    participant BE as OpenUI Backend
+    participant Login as LoginScreen
+    participant BFF as Ktor BFF :8080
+    participant BE as OpenUI Backend :7878
 
     App->>Splash: render
-    Splash->>SVM: init / collect state
-    SVM->>Repo: checkConnection()
-    Repo->>BE: GET /v1/health
-    
-    alt 200 OK
-        BE-->>Repo: 200 OK
-        Repo-->>SVM: Result.Success
-        SVM-->>Splash: SplashState.Connected
-        Splash-->>App: Navigate → ChatScreen
-    else Timeout or error
-        BE-->>Repo: IOException / 5xx
-        Repo-->>SVM: Result.Error(message)
-        SVM-->>Splash: SplashState.Error(message)
-        Splash-->>App: Show retry dialog
+    Splash->>BFF: GET /v1/health
+
+    alt BFF reachable
+        BFF->>BE: GET /v1/health
+        BE-->>BFF: 200 OK
+        BFF-->>Splash: 200 OK
+        Splash-->>App: Navigate to Login
+    else BFF unreachable
+        BFF-->>Splash: error / timeout
+        Splash-->>App: Show retry
+    end
+
+    App->>Login: render
+    Login->>BFF: POST /auth/token {username, password}
+    BFF->>BFF: lookup user, verify BCrypt hash
+
+    alt Valid credentials
+        BFF-->>Login: {token: "JWT"}
+        Login-->>App: Navigate to Chat
+    else Invalid
+        BFF-->>Login: 401 Unauthorized
+        Login-->>App: Show error
     end
 ```
 
@@ -166,23 +219,28 @@ sequenceDiagram
     participant Chat as ChatScreen
     participant CVM as ChatViewModel
     participant Repo as ChatRepository
-    participant BE as OpenUI Backend
+    participant BFF as Ktor BFF :8080
+    participant BE as OpenUI Backend :7878
 
-    User->>Chat: type prompt → Send
+    User->>Chat: type prompt, tap Send
     Chat->>CVM: onSendMessage(prompt)
-    CVM->>Repo: streamChatMessage(prompt)
-    Repo->>BE: POST /v1/chat/completions\n{stream: true}
+    CVM->>Repo: streamResponse(history)
+    Repo->>BFF: POST /v1/chat/completions\nAuthorization: Bearer JWT
+    BFF->>BFF: validate JWT signature + expiry
+    BFF->>BFF: insert request_log row
+    BFF->>BE: POST /v1/chat/completions\n{stream: true}
 
     loop SSE token chunks
-        BE-->>Repo: data: {"delta": "..."}
+        BE-->>BFF: data: {"delta": "..."}
+        BFF-->>Repo: forward raw SSE bytes
         Repo-->>CVM: Flow<String> emit
-        CVM-->>Chat: update ChatState.messages
-        Chat-->>User: append token to bubble
+        CVM-->>Chat: append token to bubble
+        Chat-->>User: streaming text
     end
 
-    BE-->>Repo: data: [DONE]
-    Repo-->>CVM: flow complete
-    CVM-->>Chat: ChatState.Idle (ready for next input)
+    BE-->>BFF: data: [DONE]
+    BFF-->>Repo: stream complete
+    CVM-->>Chat: isStreaming = false
 ```
 
 ---
@@ -196,12 +254,22 @@ stateDiagram-v2
 
     state Splash {
         [*] --> Connecting
-        Connecting --> Connected : Health check OK
+        Connecting --> Connected : BFF health OK
         Connecting --> ConnectionError : Timeout / unreachable
         ConnectionError --> Connecting : User taps Retry
     }
 
-    Connected --> Chat
+    Connected --> Login
+
+    state Login {
+        [*] --> Idle
+        Idle --> Authenticating : Submit credentials
+        Authenticating --> Authenticated : JWT received
+        Authenticating --> AuthError : 401 Unauthorized
+        AuthError --> Idle : Dismiss
+    }
+
+    Authenticated --> Chat
 
     state Chat {
         [*] --> Idle
@@ -217,34 +285,52 @@ stateDiagram-v2
 ## Key Design Decisions
 
 ### 1. Splash Screen Purpose
-The splash screen is not just decorative — it actively pings the OpenUI backend. No navigation to the chat screen occurs until the connection is confirmed. This prevents the user from reaching a broken chat experience.
+The splash screen actively pings `GET /v1/health` on the BFF. Navigation to Login only happens on a confirmed `200 OK`. This prevents the user reaching a broken experience if the BFF or OpenUI is down.
 
-### 2. SSE Streaming
-OpenUI uses the OpenAI-compatible `POST /v1/chat/completions` endpoint with `"stream": true`, responding with `text/event-stream`. Ktor reads the byte channel incrementally and emits parsed chunks into a Kotlin `Flow<String>`, keeping the UI reactive without blocking.
+### 2. BFF as Auth and Proxy Layer
+The Ktor BFF sits between the mobile app and OpenUI. It has two responsibilities:
+- **Authentication:** Issues and validates JWT tokens. The mobile app never talks to OpenUI directly, so LLM API keys and the OpenUI URL are never exposed to the client.
+- **Proxying:** Forwards all `/v1/*` requests to OpenUI verbatim, including raw SSE byte streams for streaming chat responses.
 
-### 3. Backend URL Configuration
-The backend URL is configurable. Default values differ by platform:
+### 3. JWT Authentication
+The BFF issues HMAC-256 signed JWTs with a configurable expiry (default 24 hours). The mobile app includes the token in `Authorization: Bearer <token>` on every proxied request. The BFF validates the signature and expiry before forwarding.
 
-| Context | Default URL |
+### 4. SQLite + Flyway Migrations
+The BFF uses SQLite via the Exposed ORM for persistence. Schema changes are managed exclusively through Flyway SQL migration files in `bff/src/main/resources/db/migration/`. Flyway runs on every startup and is idempotent. Exposed does not manage the schema.
+
+Current tables:
+- `users` - username + BCrypt-hashed password
+- `request_logs` - per-request audit log (user, method, path, status code, duration)
+
+### 5. SSE Streaming
+OpenUI uses `POST /v1/chat/completions` with `"stream": true`, responding with `text/event-stream`. The BFF forwards the raw SSE byte channel from OpenUI directly to the mobile client using Ktor's `respondBytesWriter` + `copyTo`. The KMP shared module emits parsed tokens into a `Flow<String>`.
+
+### 6. Backend URL Configuration
+The mobile app points at the BFF. Default values:
+
+| Context | BFF URL |
 |---|---|
-| Android Emulator | `http://10.0.2.2:7878` (`10.0.2.2` = host `localhost`) |
-| iOS Simulator | `http://localhost:7878` |
-| Physical device (both) | LAN IP of the machine running OpenUI, e.g. `http://192.168.1.x:7878` |
+| Android Emulator | `http://10.0.2.2:8080` (default) |
+| iOS Simulator (future) | `http://localhost:8080` |
+| Physical device | LAN IP of the machine running Docker, e.g. `http://192.168.1.x:8080` |
 
-A settings screen (post-MVP) will allow the user to enter a custom URL at runtime.
-
-### 4. Compose Multiplatform for UI Sharing
-Rather than writing separate Compose (Android) and SwiftUI (iOS) screens, Compose Multiplatform targets both platforms from `commonMain`. The iOS app wraps the shared composable in a `ComposeUIViewController`. This maximises code sharing while still letting each platform handle its own navigation chrome and OS-level integration via `expect/actual`.
+### 7. Compose Multiplatform for UI Sharing
+All screens (Splash, Login, Chat) are written once in `commonMain` using Compose Multiplatform. The Android host embeds them directly; the future iOS host wraps them in `ComposeUIViewController`.
 
 ---
 
 ## OpenUI API Endpoints Used
 
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/v1/health` | `GET` | Splash: verify backend is reachable |
-| `/v1/models` | `GET` | Chat: populate model selector |
-| `/v1/chat/completions` | `POST` (SSE) | Chat: stream LLM response |
+All mobile traffic goes through the BFF. The BFF exposes these endpoints to the app:
+
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/v1/health` | `GET` | None | Splash: verify BFF + OpenUI are reachable |
+| `/auth/token` | `POST` | None | Login: exchange credentials for JWT |
+| `/v1/models` | `GET` | JWT | Chat: populate model selector |
+| `/v1/chat/completions` | `POST` (SSE) | JWT | Chat: stream LLM response |
+
+The BFF proxies `/v1/*` calls transparently to `OPENUI_BACKEND_URL`.
 
 ---
 
@@ -259,7 +345,8 @@ Rather than writing separate Compose (Android) and SwiftUI (iOS) screens, Compos
 | Android minSdk | 26 |
 | iOS deployment target | 16.0+ (future) |
 | Docker + Docker Compose | v2+ |
-| Python (local dev, optional) | 3.12 via uv |
+| Python (local backend dev, optional) | 3.12 via uv |
+| JDK (local BFF dev) | 21+ |
 
 ---
 
@@ -277,27 +364,28 @@ git submodule update --init --recursive
 cp .env.example .env
 ```
 
-Edit `.env` and set at least one of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, or `GEMINI_API_KEY`.
+Edit `.env` and set at least one of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, or `GEMINI_API_KEY`. Also review the BFF secrets (`JWT_SECRET`, `BFF_ADMIN_PASSWORD`) before any non-local deployment.
 
 ### Running with Docker Compose (recommended)
 
 ```bash
-# Build the image from the local submodule source
-docker compose build backend
+# Build both images from local source
+docker compose build
 
-# Start the backend with hot-reload
+# Start OpenUI backend + BFF
 docker compose up
 ```
 
-The backend is available at `http://localhost:7878`. The Android emulator reaches it at `http://10.0.2.2:7878` (already the default in `OpenUIApp.kt`).
+| Service | Port | Description |
+|---|---|---|
+| `backend` | 7878 | OpenUI Python server (hot-reload, dev only) |
+| `bff` | 8080 | Ktor BFF - the only endpoint the mobile app talks to |
 
-**How hot-reload works:** The Dockerfile bakes the `uv` virtualenv into the image. `docker-compose.yml` then bind-mounts only `backend/backend/openui/` over `/app/openui`, so edits to the Python source are picked up by uvicorn without rebuilding the image or reinstalling dependencies. A rebuild is only needed when `pyproject.toml` or `uv.lock` changes.
+The Android emulator reaches the BFF at `http://10.0.2.2:8080` (already the default in `OpenUIApp.kt`).
+
+**How hot-reload works for the backend:** `docker-compose.yml` bind-mounts `backend/backend/openui/` over `/app/openui`. Edits to Python source are picked up immediately by uvicorn. A rebuild is only needed when `pyproject.toml` or `uv.lock` changes.
 
 ### Adding or modifying backend features
-
-```
-backend/backend/openui/   <-- all Python source lives here
-```
 
 Edit files under `backend/backend/openui/`, save, and the running container reloads automatically.
 
@@ -305,7 +393,7 @@ When you want to add a Python dependency:
 
 ```bash
 cd backend/backend
-uv add <package>            # updates pyproject.toml + uv.lock
+uv add <package>              # updates pyproject.toml + uv.lock
 cd ../..
 docker compose build backend  # rebuild to install the new dep
 ```
@@ -323,14 +411,55 @@ git add backend
 git commit -m "backend: advance submodule to my-feature"
 ```
 
+---
+
+## BFF Development
+
+The BFF is a standalone Ktor application in `bff/`. It has its own `settings.gradle.kts` so it can be built and dockerized independently of the KMP mobile project (no Android SDK required).
+
+### Running the BFF locally (without Docker)
+
+```bash
+cd bff
+
+# Run with Gradle
+./gradlew run
+```
+
+The BFF starts on port 8080 and reads config from `src/main/resources/application.conf`. Set env vars to override defaults:
+
+```bash
+OPENUI_BACKEND_URL=http://localhost:7878 \
+JWT_SECRET=my-secret \
+BFF_ADMIN_PASSWORD=mypassword \
+./gradlew run
+```
+
+### Database migrations
+
+Flyway runs automatically on startup. Migration files live at:
+
+```
+bff/src/main/resources/db/migration/
+    V1__create_users.sql
+    V2__create_request_logs.sql
+    V3__your_next_change.sql   <-- add new migrations here
+```
+
+Naming convention: `V{version}__{description}.sql`. Flyway tracks applied versions in the `flyway_schema_history` table and only runs new files. Never edit an already-applied migration - always create a new one.
+
+### Adding a new BFF route
+
+1. Add the route function in `bff/src/main/kotlin/.../routes/`
+2. Register it in `Routing.kt`
+3. Wrap with `authenticate("jwt-auth") { ... }` if it requires a valid JWT
+
 ### App backend URL
 
 The URL the Android app connects to is set in `androidApp/src/main/kotlin/com/dgurnick/openuiexplore/OpenUIApp.kt`:
 
 | Context | URL |
 |---|---|
-| Android Emulator | `http://10.0.2.2:7878` (default) |
-| iOS Simulator (future) | `http://localhost:7878` |
-| Physical device | LAN IP of your machine, e.g. `http://192.168.1.x:7878` |
-
-The live public demo at `https://openui.fly.dev` can also be used during development (requires GitHub login for quota enforcement).
+| Android Emulator | `http://10.0.2.2:8080` (default) |
+| iOS Simulator (future) | `http://localhost:8080` |
+| Physical device | LAN IP of your machine, e.g. `http://192.168.1.x:8080` |
