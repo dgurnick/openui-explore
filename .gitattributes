@@ -1,0 +1,17 @@
+# Handle line endings automatically for files git detects as text
+* text=auto
+
+# Binary image files - never apply line-ending conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+
+# APK and archive files
+*.apk binary
+*.jar binary
+*.zip binary
+*.tar binary
+*.gz binary
