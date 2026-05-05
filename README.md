@@ -35,24 +35,32 @@ OpenUI runs as a local Python server (port `7878`) backed by any LLM (OpenAI, An
 
 ```
 openui-explore/
+├── backend/                       # Git submodule: wandb/openui (Python backend)
+│   └── backend/                   # Python package root
+│       ├── Dockerfile             # Multi-stage uv build
+│       ├── pyproject.toml
+│       └── openui/                # Python source - edit here for new features
 ├── shared/                        # KMP shared module (logic + UI)
 │   ├── commonMain/
 │   │   ├── data/
-│   │   │   ├── model/             # ChatMessage, ChatSession, UIComponent
+│   │   │   ├── model/             # ChatMessage, ApiModels
 │   │   │   ├── network/           # Ktor client, OpenUIApiService
 │   │   │   └── repository/        # ConnectionRepository, ChatRepository
 │   │   ├── presentation/
 │   │   │   ├── splash/            # SplashViewModel, SplashState
-│   │   │   └── chat/              # ChatViewModel, ChatState, ChatUiEvent
+│   │   │   └── chat/              # ChatViewModel, ChatState
 │   │   └── ui/
 │   │       ├── splash/            # SplashScreen composable
 │   │       └── chat/              # ChatScreen, MessageBubble composables
-│   ├── androidMain/               # Android actuals (HttpClient engine, etc.)
-│   └── iosMain/                   # iOS actuals
+│   ├── androidMain/               # Android actuals (OkHttp engine)
+│   └── iosMain/                   # iOS actuals (Darwin engine, future)
 ├── androidApp/                    # Android application module
-│   └── MainActivity.kt            # Sets content to shared SplashScreen
-└── iosApp/                        # Xcode project
-    └── ContentView.swift          # Hosts shared Compose UI via ComposeUIViewController
+│   └── src/main/kotlin/
+│       ├── MainActivity.kt        # Edge-to-edge host, Splash/Chat nav
+│       ├── OpenUIApp.kt           # Koin init, backend URL config
+│       └── di/ViewModelModule.kt  # ViewModel bindings
+├── docker-compose.yml             # Dev environment (builds from submodule)
+└── .env.example                   # API key template (copy to .env)
 ```
 
 ---
@@ -245,24 +253,84 @@ Rather than writing separate Compose (Android) and SwiftUI (iOS) screens, Compos
 | Requirement | Version |
 |---|---|
 | Android Studio | Jellyfish+ |
-| Xcode | 15+ |
+| Xcode | 15+ (iOS, future) |
 | Kotlin | 2.0+ |
 | Gradle | 8.x |
 | Android minSdk | 26 |
-| iOS deployment target | 16.0+ |
-| OpenUI backend | Self-hosted Docker or `openui.fly.dev` |
+| iOS deployment target | 16.0+ (future) |
+| Docker + Docker Compose | v2+ |
+| Python (local dev, optional) | 3.12 via uv |
 
 ---
 
-## Running the Backend (Docker — quickest)
+## Backend Development
+
+The OpenUI Python backend lives in `backend/` as a **git submodule** pointing at [wandb/openui](https://github.com/wandb/openui). Keeping it as a submodule means you can freely modify the source, commit your changes, and eventually point the submodule at your own fork without mixing backend and mobile history.
+
+### First-time setup
 
 ```bash
-# Set at least one LLM API key
-export OPENAI_API_KEY=sk-...
+# After cloning this repo, initialise the submodule
+git submodule update --init --recursive
 
-docker run --rm -p 7878:7878 \
-  -e OPENAI_API_KEY \
-  ghcr.io/wandb/openui
+# Copy the env template and fill in at least one LLM API key
+cp .env.example .env
 ```
 
-The app will connect to `http://<host>:7878`. The live public demo at `https://openui.fly.dev` can also be used as the backend URL during development (requires GitHub login for quota enforcement).
+Edit `.env` and set at least one of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, or `GEMINI_API_KEY`.
+
+### Running with Docker Compose (recommended)
+
+```bash
+# Build the image from the local submodule source
+docker compose build backend
+
+# Start the backend with hot-reload
+docker compose up
+```
+
+The backend is available at `http://localhost:7878`. The Android emulator reaches it at `http://10.0.2.2:7878` (already the default in `OpenUIApp.kt`).
+
+**How hot-reload works:** The Dockerfile bakes the `uv` virtualenv into the image. `docker-compose.yml` then bind-mounts only `backend/backend/openui/` over `/app/openui`, so edits to the Python source are picked up by uvicorn without rebuilding the image or reinstalling dependencies. A rebuild is only needed when `pyproject.toml` or `uv.lock` changes.
+
+### Adding or modifying backend features
+
+```
+backend/backend/openui/   <-- all Python source lives here
+```
+
+Edit files under `backend/backend/openui/`, save, and the running container reloads automatically.
+
+When you want to add a Python dependency:
+
+```bash
+cd backend/backend
+uv add <package>            # updates pyproject.toml + uv.lock
+cd ../..
+docker compose build backend  # rebuild to install the new dep
+```
+
+### Pointing the submodule at your own fork
+
+```bash
+cd backend
+git remote add fork https://github.com/<you>/openui.git
+git checkout -b my-feature
+# ... make changes ...
+git push fork my-feature
+cd ..
+git add backend
+git commit -m "backend: advance submodule to my-feature"
+```
+
+### App backend URL
+
+The URL the Android app connects to is set in `androidApp/src/main/kotlin/com/dgurnick/openuiexplore/OpenUIApp.kt`:
+
+| Context | URL |
+|---|---|
+| Android Emulator | `http://10.0.2.2:7878` (default) |
+| iOS Simulator (future) | `http://localhost:7878` |
+| Physical device | LAN IP of your machine, e.g. `http://192.168.1.x:7878` |
+
+The live public demo at `https://openui.fly.dev` can also be used during development (requires GitHub login for quota enforcement).
