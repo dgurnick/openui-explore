@@ -8,3 +8,6 @@ captures/
 .externalNativeBuild/
 .cxx/
 androidApp/release/
+
+# Backend dev secrets - never commit real keys
+.env
