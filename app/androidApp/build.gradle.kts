@@ -33,6 +33,10 @@ android {
 dependencies {
     implementation(project(":shared"))
     implementation(libs.androidx.activity.compose)
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.material3)
+    implementation(libs.compose.runtime)
     implementation(libs.koin.android)
+    implementation(libs.koin.compose.viewmodel)
     implementation(libs.material)
 }
